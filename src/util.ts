@@ -1,0 +1,207 @@
+
+export type Nil = null | undefined;
+
+export namespace util {
+
+    export function ellipsize(text: string, maxLength: number) {
+        if (text.length > maxLength) {
+            return text.slice(0, maxLength - 3) + "...";
+        }
+        return text;
+    }
+
+    export function appendPiece(text: string, delim: string, append: string): string {
+        if (text == "") return append;
+        return text + delim + append;
+    }
+
+    export function clamp(val: number, min: number, max: number){
+        return Math.max(min, Math.min(max, val));
+    }
+
+    export function replaceAll(text: string, search: string, replace: string): string {
+        return text.replace(new RegExp(search, 'g'), replace);
+    }
+
+    export function deepCopy(obj: any): any {
+        return JSON.parse(JSON.stringify(obj));
+    }
+
+    export function UUID(): string {
+        // only available in HTTPS
+        if (typeof crypto?.randomUUID === 'function')
+            return crypto.randomUUID();
+
+        // you're not banking with this - it's fine
+        return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+            const r = Math.random() * 16 | 0;
+            const v = c === 'x' ? r : (r & 0x3 | 0x8);
+            return v.toString(16);
+        });
+    }
+    export function isGUID(baseName: string) {
+        return /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(baseName);
+    }
+
+    export function appendPathToUrl(base: string, segment: string): URL {
+        const url = new URL(base);
+        if (segment.startsWith('/')) segment = segment.substring(1);
+        // Ensure no double slashes or missing slashes
+        url.pathname = `${url.pathname.replace(/\/$/, '')}/${segment}`;
+        return url;
+    }
+
+
+    export function zValidDate(val?: string): boolean {
+        return !isNaN(Date.parse(val ?? ''));
+    }
+
+    export function parseDate(str?: string) {
+        let num = Date.parse(str as string ?? "");
+        return new Date(isNaN(num) ? 0 : num);
+    }
+
+    export function assetPng(path: string): URL {
+        let base = new URL(window.location.href);
+        return new URL(`./${path}.png`, base);
+    }
+
+    export function quickPick<T>(...items: T[]): T {
+        if (items.length === 0) throw new Error("At least one item must be provided");
+        let idx = Math.floor(Math.random() * items.length);
+        return items[idx] as T;
+    }
+
+    export function shuffle<T>(arr:T[]){
+        //in-place shuffle this array
+        for (let i = arr.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [arr[i], arr[j]] = [arr[j]!, arr[i]!];
+        }
+        return arr;
+    }
+}
+
+export namespace Rest {
+    export async function get<T>(baseUrl: string, path: string, params?: { [key: string]: string })
+        : Promise<OResult<T>> {
+        if (!baseUrl) return new OResult(false, 'URL is required');
+        let url = util.appendPathToUrl(baseUrl, path);
+        for (const key in params) {
+            if (params.hasOwnProperty(key)) {
+                url.searchParams.append(key, params[key]!);
+            }
+        }
+        try {
+            const response = await fetch(url, {
+                method: 'GET',
+                signal: AbortSignal.timeout(3000),
+            });
+
+            if (response.ok) {
+                const result = await response.json();
+                return new OResult(true, undefined, result as any);
+            } else {
+                console.error('Failed:', response.status, response.statusText);
+                return new OResult(false, `Error: ${response.status} ${response.statusText}`);
+            }
+        } catch (error) {
+            console.error('Error:', error);
+            return new OResult(false, `Error: ${error}`);
+        }
+    }
+    export function post<T>(baseUrl: string, path: string, bodyObj: any): Promise<OResult<T>> {
+        return _post<T>(baseUrl, path, bodyObj, 3000);
+    }
+    export function postLong<T>(baseUrl: string, path: string, bodyObj: any): Promise<OResult<T>> {
+        return _post<T>(baseUrl, path, bodyObj, 1000 * 60 * 5);
+    }
+    export async function _post<T>(baseUrl: string, path: string, bodyObj: any, timeoutMs?: number): Promise<OResult<T>> {
+        if (!baseUrl) return new OResult(false, 'URL is required');
+        let url = util.appendPathToUrl(baseUrl, path);
+        try {
+            const response = await fetch(url, {
+                method: 'POST',
+                signal: timeoutMs ? AbortSignal.timeout(timeoutMs) : undefined,
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(bodyObj)
+            });
+
+            if (response.ok) {
+                const result = await response.json();
+                return new OResult(true, undefined, result as any);
+            } else {
+                console.error('Failed:', response.status, response.statusText);
+                return new OResult(false, `Error: ${response.status} ${response.statusText}`);
+            }
+        } catch (error) {
+            console.error('Error:', error);
+            return new OResult(false, `Error: ${error}`);
+        }
+    }
+}
+export class OResult<T> {
+    success: boolean;
+    error?: string;
+    response?: T;
+    public constructor(success: boolean, error?: string, response?: T) {
+        this.success = success;
+        this.error = error;
+        this.response = response;
+    }
+}
+
+export class Deferred<T> implements Promise<T> {
+
+    private _resolveSelf!: ((value: T | PromiseLike<T>) => void);
+    private _rejectSelf!: ((value: T | PromiseLike<T>) => void);
+    private promise: Promise<T>
+
+    constructor() {
+        this.promise = new Promise((resolve, reject) => {
+            this._resolveSelf = resolve
+            this._rejectSelf = reject
+        });
+    }
+    get [Symbol.toStringTag](): string { return "Deferred"; }
+
+    public then<TResult1 = T, TResult2 = never>(
+        onfulfilled?: ((value: T) =>
+            TResult1 | PromiseLike<TResult1>) | undefined | null,
+        onrejected?: ((reason: any) =>
+            TResult2 | PromiseLike<TResult2>) | undefined | null
+    ): Promise<TResult1 | TResult2> {
+        return this.promise.then(onfulfilled, onrejected);
+    }
+
+    public catch<TResult = never>(
+        onrejected?: ((reason: any) =>
+            TResult | PromiseLike<TResult>) | undefined | null
+    ): Promise<T | TResult> {
+        return this.promise.catch(onrejected);
+    }
+
+    public async finally(onfinally?: () => void): Promise<T> {
+        return this.promise.finally(onfinally);
+    }
+
+
+    public resolve(val?: T) { this._resolveSelf(val as any); }
+    public reject(reason?: any) { this._rejectSelf(reason); }
+
+}
+
+
+export class Broadcaster<T> {
+    private _listeners: ((e: T) => void)[] = [];
+
+    public hook(callback: (e: T) => void) {
+        this._listeners.push(callback);
+    }
+
+    public trigger(ev: T) {
+        for (const callback of [...this._listeners]) {
+            callback(ev);
+        }
+    }
+}
